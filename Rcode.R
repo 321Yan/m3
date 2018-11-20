@@ -23,7 +23,7 @@ XTid = XT$Id
 XT = subset(XT, select = -Id)
 XT[!is.na(XT)&(XT<=-0.89)] = NA
 
-  
+
 # problematic variables c03 b23 b20 b15 b14 b13 b12 b11
 samples = cbind(X,Value = Y[,"Value"])
 samples = samples[,!colnames(samples)%in%constV]
@@ -91,15 +91,19 @@ data_prep = function(train, test, option) {
   n_tot = n_train+n_test
   
   tot = rbind(train,test)
-
-  ### remove outliers
-  # ...
   
-    
+  
+  # augmentation
+  imp = sapply(tot,function(x){as.numeric(is.na(x))})
+  colnames(imp) = paste0("V",seq(1:ncol(imp)))
+  
+  
   # prepro = caret::preProcess(tot,method = "bagImpute")
   # tot = predict(prepro,tot)
   
   tot = randomForest::na.roughfix(tot)
+  
+  tot = cbind(tot,imp)
   
   train = cbind(tot[1:n_train,],"Value" = train_y)
   
@@ -186,13 +190,13 @@ dtrain = xgb.DMatrix(data = subset(xgb_train,select = -Value),label = subset(xgb
 dtest = xgb.DMatrix(data =  subset(xgb_test,select = -Value),label= subset(xgb_test,select = Value))
 
 params <- list(booster = "gbtree",
-               objective = "reg:linear", eta=0.05, gamma=0, max_depth=6, min_child_weight=1, subsample=0.8, colsample_bytree=0.8,nthread = 8)
+               objective = "reg:linear", eta=0.05, gamma=0, max_depth=5, min_child_weight=1, subsample=0.8, colsample_bytree=0.8,nthread = 8)
 xgbcv <- xgb.cv( params = params, data =dtrain, nrounds = 500, nfold = 5, showsd = T, 
                  print_every_n = 10, early_stop_round = 20, maximize = F,metrics = 'rmse')
 
 # tuning
 xgb_lrn = makeLearner(cl = "regr.xgboost",predict.type = "response")
-xgb_lrn$par.vals = list(objective="reg:linear", eval_metric="error", nrounds=300, eta=0.05,verbose=0)
+xgb_lrn$par.vals = list(objective="reg:linear", eval_metric="error", nrounds=400, eta=0.05,verbose=0)
 xgb_ps = makeParamSet( makeIntegerParam("max_depth",lower = 3,upper = 6),
                        makeNumericParam("min_child_weight",lower = 1,upper = 9), makeNumericParam("subsample",lower = 0.5,upper = 1),
                        makeNumericParam("colsample_bytree",lower = 0.5,upper = 1))
