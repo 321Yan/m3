@@ -21,7 +21,7 @@ constV = names(which(sapply(XT,function(x){var(x,na.rm = T)==0})==T))
 XT = XT[,!colnames(XT)%in%constV]
 XTid = XT$Id
 XT = subset(XT, select = -Id)
-XT[!is.na(XT)&(XT<=-0.89)] = NA
+XT[!is.na(XT)&(XT<=-8.9)] = NA
 
 
 # problematic variables c03 b23 b20 b15 b14 b13 b12 b11
@@ -29,29 +29,34 @@ samples = cbind(X,Value = Y[,"Value"])
 samples = samples[,!colnames(samples)%in%constV]
 samples = subset(samples, select = -Id)
 
-samples[!is.na(samples)&(samples<=-0.89)] = NA
+samples[!is.na(samples)&(samples<=-8.9)] = NA
 
 
+all7TR = apply(samples[,!colnames(samples)%in%c("Value","G01","G02","G03")],1,function(a){T%in%(a>6.9)})
+samples = samples[!all7TR,]
 
-missing = as.vector(NULL)
-for(i in 1:ncol(samples)) {
-  n = sum(is.na(samples[,i]))
-  p = round(n/nrow(samples),2)
-  if(n > 0) {
-    print(paste0(colnames(samples[i]),": ",n," ",p))
-    missing = c(missing,colnames(samples[i]))
-  }
-}
+all7TE = apply(XT[,!colnames(XT)%in%c("Value","G01","G02","G03")],1,function(a){T%in%(a>6.9)})
+XT_n7 = XT[!all7TE,]
 
-for(i in 1:ncol(samples)){
-  hist(samples[,i],breaks = 100,main = names(samples)[i])
-}
+# missing = as.vector(NULL)
+# for(i in 1:ncol(samples)) {
+#   n = sum(is.na(samples[,i]))
+#   p = round(n/nrow(samples),2)
+#   if(n > 0) {
+#     print(paste0(colnames(samples[i]),": ",n," ",p))
+#     missing = c(missing,colnames(samples[i]))
+#   }
+# }
+
+# for(i in 1:ncol(samples)){
+#   hist(samples[,i],breaks = 100,main = names(samples)[i])
+# }
 
 
 # G6 = apply(samples[,!colnames(samples)%in%"Value"],1,function(x){T%in%(x>6)})
 # plot(density(samples[G6,"Value"]))
 
-S_index = sample(nrow(samples),floor(0.03*nrow(samples)))
+S_index = sample(nrow(samples),nrow(samples))
 SS = samples[S_index,]
 
 # observing missing value in each row
@@ -105,6 +110,13 @@ data_prep = function(train, test, option) {
   
   tot = cbind(tot,imp)
   
+  tot = tot[,apply(tot, 2, var, na.rm=TRUE) != 0]
+  
+  # feature extraction
+  tot$div = tot$E01/tot$C01
+  tot$div2 = tot$A01/tot$D08
+  
+  
   train = cbind(tot[1:n_train,],"Value" = train_y)
   
   if(option == 0){
@@ -124,11 +136,12 @@ data_prep = function(train, test, option) {
 
 
 
+
 tot = data_prep(train = train, test = test,option = 0)
 
-for(i in 1:ncol(tot)){
-  hist(tot[,i],breaks = 100,main = names(tot)[i])
-}
+# for(i in 1:ncol(tot)){
+#   hist(tot[,i],breaks = 100,main = names(tot)[i])
+# }
 # write.csv(tot, file = "bagImpute.csv",row.names = F, col.names = T)
 
 tsk = makeRegrTask(data = tot, target = "Value")
@@ -145,7 +158,7 @@ library(parallelMap)
 parallelStartSocket(cpus = detectCores()-1)
 
 # number of iterations used for hyperparameters tuning
-tc = makeTuneControlRandom(maxit = 30)
+# tc = makeTuneControlRandom(maxit = 30)
 
 # resampling strategy for evaluating model performance
 rdesc = makeResampleDesc("CV", iters = 3)
@@ -184,71 +197,83 @@ rdesc = makeResampleDesc("CV", iters = 3)
 
 #------------------ xgboost ------------------
 
-xgb_train = as.matrix(tot[1:nrow(train),])
-xgb_test = as.matrix(tot[(nrow(train)+1):nrow(SS),])
-dtrain = xgb.DMatrix(data = subset(xgb_train,select = -Value),label = subset(xgb_train,select = Value)) 
-dtest = xgb.DMatrix(data =  subset(xgb_test,select = -Value),label= subset(xgb_test,select = Value))
+# xgb_train = as.matrix(tot)
+# xgb_test = as.matrix(tot[(nrow(train)+1):nrow(SS),])
+# dtrain = xgb.DMatrix(data = subset(xgb_train,select = -Value),label = subset(xgb_train,select = Value)) 
+# dtest = xgb.DMatrix(data =  subset(xgb_test,select = -Value),label= subset(xgb_test,select = Value))
 
-params <- list(booster = "gbtree",
-               objective = "reg:linear", eta=0.05, gamma=0, max_depth=5, min_child_weight=1, subsample=0.8, colsample_bytree=0.8,nthread = 8)
-xgbcv <- xgb.cv( params = params, data =dtrain, nrounds = 500, nfold = 5, showsd = T, 
-                 print_every_n = 10, early_stop_round = 20, maximize = F,metrics = 'rmse')
+# params <- list(booster = "gbtree",
+#                objective = "reg:linear", eta=0.1, gamma=0, max_depth=3, min_child_weight=7, subsample=0.9, colsample_bytree=1,nthread = 24)
+# xgbcv <- xgb.cv( params = params, data =dtrain, nrounds = 2000, nfold = 5, showsd = F, 
+#                  print_every_n = 40, early_stop_round = 20, maximize = F,metrics = 'rmse')
+
 
 # tuning
 xgb_lrn = makeLearner(cl = "regr.xgboost",predict.type = "response")
-xgb_lrn$par.vals = list(objective="reg:linear", eval_metric="error", nrounds=400, eta=0.05,verbose=0)
-xgb_ps = makeParamSet( makeIntegerParam("max_depth",lower = 3,upper = 6),
-                       makeNumericParam("min_child_weight",lower = 1,upper = 9), makeNumericParam("subsample",lower = 0.5,upper = 1),
-                       makeNumericParam("colsample_bytree",lower = 0.5,upper = 1))
-xgb_tr = tuneParams(xgb_lrn,tsk.train,cv3,rmse,xgb_ps,tc)
-xgb_lrn = setHyperPars(xgb_lrn,par.vals = xgb_tr$x)
+xgb_lrn$par.vals = list(booster = "gbtree", objective = "reg:linear", eta=0.1, gamma=0, max_depth=3, min_child_weight=7,
+                        subsample=0.9, colsample_bytree=1,nthread = 24,nrounds = 2200,print_every_n = 40)
+
+
+# xgb_ps = makeParamSet( makeIntegerParam("max_depth",lower = 3,upper = 4),
+#                        makeNumericParam("min_child_weight",lower = 2,upper = 9), makeNumericParam("subsample",lower = 0.6,upper = 1),
+#                        makeNumericParam("colsample_bytree",lower = 0.6,upper = 1))
+# xgb_tr = tuneParams(xgb_lrn,tsk.train,cv3,rmse,xgb_ps,tc)
+# xgb_lrn = setHyperPars(xgb_lrn,par.vals = xgb_tr$x)
 
 xgb_mod = train(xgb_lrn, tsk.train)
-# xgb_pred = predict(xgb_mod, tsk.test)
-# performance(xgb_pred, measures = mae)
-r = resample(xgb_lrn, tsk, resampling = rdesc, show.info = T, models = FALSE,measures = rmse)
+xgb_pred = predict(xgb_mod, tsk.test)
+performance(xgb_pred, measures = rmse)
+# r = resample(xgb_lrn, tsk, resampling = rdesc, show.info = T, models = T,measures = rmse)
+# FPP = plotFeatureImportance(xgb_mod,10)
+# ggsave("FPPxgb7_10.png")
 
 #------------------------------------------------
 
 
 
+submission7 = data.frame(matrix(NA,nrow=sum(all7TE),ncol = 2))
+colnames(submission7) = c("Id","Value")
+submission7$Id = XTid[all7TE]
+submission7$Value = 50.17517 
 
 
-
-
-sub = data_prep(train = SS, test = XT,option = 1)
+sub = data_prep(train = SS, test = XT_n7,option = 1)
 sub = sub[[2]]
 
+
+# 
 make_prediction = function(lrn,tsk,sub_data,subname) {
   mod = train(lrn,tsk)
   pred = predict(mod,newdata = sub_data)
   
   
-  rdesc = makeResampleDesc("CV", iters = 3)
-  r = resample(lrn, tsk, resampling = rdesc, show.info = T, models = FALSE,measures = rmse)
+  # rdesc = makeResampleDesc("CV", iters = 3)
+  # r = resample(lrn, tsk, resampling = rdesc, show.info = T, models = FALSE,measures = rmse)
   
-  submission = data.frame(matrix(NA,nrow=length(XTid),ncol = 2))
+  submission = data.frame(matrix(NA,nrow=sum(!all7TE),ncol = 2))
   colnames(submission) = c("Id","Value")
-  submission$Id = XTid
+  submission$Id = XTid[!all7TE]
   submission$Value = pred$data$response
+  submission = arrange(rbind(submission,submission7),by = Id)
+  
   write.csv(submission,file = subname,row.names = F, col.names = T)
   
 }
 
-make_prediction(lrn = xgb_lrn,tsk = tsk,sub_data = sub,subname = "xgb.csv")
-
-
-
-TRT = sample_n(samples[-S_index,],50000)
-TRT_y = TRT$Value
-TRS = data_prep(train = SS, test = TRT,option = 1)
-TRS = TRS[[2]]
-
-mod1 = train(xgb_lrn,tsk)
-pred1 = predict(mod1,newdata = TRS)
-P_y = pred1$data$response
-RMSE = sqrt(mean((TRT_y-P_y)^2))
-RMSE
+make_prediction(lrn = xgb_lrn,tsk = tsk,sub_data = sub,subname = "xgb11.csv")
+# 
+# 
+# 
+# TRT = sample_n(samples[-S_index,],800)
+# TRT_y = TRT$Value
+# TRS = data_prep(train = SS, test = TRT,option = 1)
+# TRS = TRS[[2]]
+# 
+# mod1 = train(xgb_lrn,tsk)
+# pred1 = predict(mod1,newdata = TRS)
+# P_y = pred1$data$response
+# RMSE = sqrt(mean((TRT_y-P_y)^2))
+# RMSE
 
 
 
