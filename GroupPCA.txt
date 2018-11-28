@@ -1,0 +1,11 @@
+  groupName = unique(substr(names(tot),start = 1,stop = 1))
+  groupName = groupName[!groupName%in%"E"] 
+  TOT = tot
+  pp = function(dd){
+    pm = caret::preProcess(dd, method = c("center", "scale","medianImpute","pca"), thresh = 1)
+    pd = predict(pm,dd)
+    return(pd)
+  }
+  for(i in 1:length(groupName)) {
+    TOT[,substr(names(tot),1,1)%in%groupName[i]] = pp(tot[,substr(names(tot),1,1)%in%groupName[i]])
+  }
